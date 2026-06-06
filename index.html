@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Goal Dashboard</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:#0f1117;color:#fff}
+.container{max-width:1400px;margin:auto;padding:20px}
+h1{margin:0 0 20px}
+.topbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+input,select,button,textarea{border:none;border-radius:10px;padding:10px}
+button{cursor:pointer;background:#4f46e5;color:#fff}
+.card{background:rgba(255,255,255,.06);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:16px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.goal{margin-top:10px}
+.goal-header{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.children{margin-left:30px}
+.progress{height:8px;background:#222;border-radius:99px;overflow:hidden;margin:8px 0}
+.progress>div{height:100%;background:linear-gradient(90deg,#4f46e5,#22c55e)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center}
+.modal-content{width:min(500px,95vw)}
+.badge{padding:4px 8px;border-radius:999px;background:#333}
+.small{font-size:.85rem;color:#bbb}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Personal Goal Dashboard</h1>
+
+<div class="stats" id="stats"></div>
+
+<div class="topbar">
+<input id="search" placeholder="Search goals..." style="flex:1">
+<select id="sort">
+<option value="created">Recently Created</option>
+<option value="due">Due Date</option>
+<option value="alpha">Alphabetical</option>
+<option value="progress">Completion %</option>
+</select>
+<button onclick="openCreate()">+ Create Goal</button>
+</div>
+
+<div id="goalTree"></div>
+</div>
+
+<div class="modal" id="modal">
+<div class="modal-content card">
+<h2 id="modalTitle">Create Goal</h2>
+<input id="title" placeholder="Title" style="width:100%;margin-bottom:10px">
+<textarea id="description" placeholder="Description" style="width:100%;margin-bottom:10px"></textarea>
+<input id="dueDate" type="date" style="width:100%;margin-bottom:10px">
+<button onclick="saveGoal()">Save</button>
+<button onclick="closeModal()">Cancel</button>
+</div>
+</div>
+
+<script>
+let goals=JSON.parse(localStorage.getItem("goalDashboardData")||"[]");
+let editing=null,parentForNew=null;
+
+function saveData(){localStorage.setItem("goalDashboardData",JSON.stringify(goals));}
+
+function uid(){return Date.now()+Math.random().toString(36).slice(2);}
+
+function openCreate(parent=null){
+editing=null;parentForNew=parent;
+modal.style.display="flex";
+modalTitle.textContent="Create Goal";
+title.value="";description.value="";dueDate.value="";
+}
+function editGoal(id){
+const g=findGoal(id,goals);
+editing=id;
+modal.style.display="flex";
+modalTitle.textContent="Edit Goal";
+title.value=g.title;
+description.value=g.description;
+dueDate.value=g.dueDate;
+}
+function closeModal(){modal.style.display="none";}
+
+function saveGoal(){
+const data={title:title.value,description:description.value,dueDate:dueDate.value};
+if(editing){
+Object.assign(findGoal(editing,goals),data);
+}else{
+const goal={id:uid(),title:data.title,description:data.description,dueDate:data.dueDate,status:"Not Started",createdAt:new Date().toISOString(),collapsed:false,children:[]};
+if(parentForNew){
+findGoal(parentForNew,goals).children.push(goal);
+}else goals.push(goal);
+}
+saveData();render();closeModal();
+}
+
+function findGoal(id,list){
+for(const g of list){
+if(g.id===id)return g;
+const f=findGoal(id,g.children||[]);
+if(f)return f;
+}
+}
+
+function deleteGoal(id,list=goals){
+for(let i=0;i<list.length;i++){
+if(list[i].id===id){list.splice(i,1);return true;}
+if(deleteGoal(id,list[i].children))return true;
+}
+}
+
+function progress(goal){
+if(!goal.children.length)return goal.status==="Completed"?100:0;
+let done=goal.children.filter(x=>x.status==="Completed").length;
+return Math.round(done/goal.children.length*100);
+}
+
+function daysText(date){
+if(!date)return "";
+const d=Math.ceil((new Date(date)-new Date())/86400000);
+if(d===0)return "Due Today";
+if(d<0)return Math.abs(d)+" Days Overdue";
+return d+" Days Left";
+}
+
+function renderGoal(goal){
+const p=progress(goal);
+const div=document.createElement("div");
+div.className="goal card";
+div.innerHTML=`
+<div class="goal-header">
+<button onclick="toggle('${goal.id}')">${goal.collapsed?'▶':'▼'}</button>
+<strong>${goal.title}</strong>
+<span class="badge">${goal.status}</span>
+<span class="small">${daysText(goal.dueDate)}</span>
+<select onchange="changeStatus('${goal.id}',this.value)">
+<option ${goal.status==='Not Started'?'selected':''}>Not Started</option>
+<option ${goal.status==='In Progress'?'selected':''}>In Progress</option>
+<option ${goal.status==='Completed'?'selected':''}>Completed</option>
+</select>
+<button onclick="openCreate('${goal.id}')">Add Subgoal</button>
+<button onclick="editGoal('${goal.id}')">Edit</button>
+<button onclick="removeGoal('${goal.id}')">Delete</button>
+</div>
+<div>${goal.description||''}</div>
+<div class="progress"><div style="width:${p}%"></div></div>
+<div class="small">${p}% Complete</div>
+<div class="children" style="display:${goal.collapsed?'none':'block'}"></div>`;
+const childContainer=div.querySelector(".children");
+(goal.children||[]).forEach(c=>childContainer.appendChild(renderGoal(c)));
+return div;
+}
+
+function changeStatus(id,val){findGoal(id,goals).status=val;saveData();render();}
+function toggle(id){findGoal(id,goals).collapsed=!findGoal(id,goals).collapsed;saveData();render();}
+function removeGoal(id){if(confirm("Delete goal?")){deleteGoal(id);saveData();render();}}
+
+function flatten(list,out=[]){for(const g of list){out.push(g);flatten(g.children,out);}return out;}
+
+function renderStats(){
+const all=flatten(goals,[]);
+const completed=all.filter(g=>g.status==="Completed").length;
+const inprog=all.filter(g=>g.status==="In Progress").length;
+const overdue=all.filter(g=>g.dueDate && new Date(g.dueDate)<new Date() && g.status!=="Completed").length;
+const pct=all.length?Math.round(completed/all.length*100):0;
+stats.innerHTML=`
+<div class="card">Total Goals<br><strong>${all.length}</strong></div>
+<div class="card">Completed<br><strong>${completed}</strong></div>
+<div class="card">In Progress<br><strong>${inprog}</strong></div>
+<div class="card">Overdue<br><strong>${overdue}</strong></div>
+<div class="card">Completion %<br><strong>${pct}%</strong></div>`;
+}
+
+function render(){
+let roots=[...goals];
+const q=search.value.toLowerCase();
+if(q){
+const filter=(arr)=>arr.filter(g=>(g.title+g.description).toLowerCase().includes(q));
+roots=filter(flatten(goals,[]));
+}
+goalTree.innerHTML="";
+if(!q){
+roots.forEach(g=>goalTree.appendChild(renderGoal(g)));
+}else{
+roots.forEach(g=>goalTree.appendChild(renderGoal(g)));
+}
+renderStats();saveData();
+}
+search.oninput=render;
+render();
+</script>
+</body>
+</html>
