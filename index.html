@@ -55,85 +55,11 @@ button{cursor:pointer;background:#4f46e5;color:#fff}
 </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <script>
-
-const SUPABASE_URL = "https://civqgdbdqsbendftklht.supabase.co/rest/v1/";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNpdnFnZGJkcXNiZW5kZnRrbGh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMDUwMTUsImV4cCI6MjA5NjU4MTAxNX0.bv7JNmfsb6sBalsxEfD7OgaYjFtmnvHziA60EsjogfA";
-
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-async function toggle(id){
-const g = goals.find(x => x.id === id) || findGoal(id, goals);
-
-await supabase.from("goals")
-  .update({collapsed: !g.collapsed})
-  .eq("id",id);
-
-loadGoals();
-}
-
-
-async function changeStatus(id,val){
-await supabase.from("goals")
-  .update({status:val})
-  .eq("id",id);
-
-loadGoals();
-}
-
-async function removeGoal(id){
-if(confirm("Delete goal?")){
-  await supabase.from("goals").delete().eq("id", id);
-  loadGoals();
-}
-}
-
-async function saveGoal(){
-const data={
-  id: editing || uid(),
-  title:title.value,
-  description:description.value,
-  dueDate:dueDate.value,
-  status:"Not Started",
-  createdAt:new Date().toISOString(),
-  parentId: parentForNew || null,
-  collapsed:false
-};
-
-await supabase.from("goals").upsert(data);
-
-editing=null;
-parentForNew=null;
-closeModal();
-loadGoals();
-}
-
-async function loadGoals(){
-  const { data } = await supabase.from("goals").select("*");
-  goals = buildTree(data || []);
-  render();
-}
-
-function buildTree(items){
-  const map = {};
-  const roots = [];
-
-  items.forEach(i => map[i.id] = {...i, children: []});
-
-  items.forEach(i => {
-    if(i.parentId){
-      map[i.parentId]?.children.push(map[i.id]);
-    } else {
-      roots.push(map[i.id]);
-    }
-  });
-
-  return roots;
-}
-
+let goals=JSON.parse(localStorage.getItem("goalDashboardData")||"[]");
 let editing=null,parentForNew=null;
+
+function saveData(){localStorage.setItem("goalDashboardData",JSON.stringify(goals));}
 
 function uid(){return Date.now()+Math.random().toString(36).slice(2);}
 
@@ -261,9 +187,6 @@ renderStats();saveData();
 }
 search.oninput=render;
 render();
-
-loadGoals();
-
 </script>
 </body>
 </html>
