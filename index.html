@@ -55,138 +55,301 @@ button{cursor:pointer;background:#4f46e5;color:#fff}
 </div>
 </div>
 
-<script>
-let goals=JSON.parse(localStorage.getItem("goalDashboardData")||"[]");
-let editing=null,parentForNew=null;
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-function saveData(){localStorage.setItem("goalDashboardData",JSON.stringify(goals));}
+<script>const SUPABASE_URL = "https://civqgdbdqsbendftklht.supabase.co";
+const SUPABASE_KEY = "YOUR_ANON_KEY_HERE";
 
-function uid(){return Date.now()+Math.random().toString(36).slice(2);}
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-function openCreate(parent=null){
-editing=null;parentForNew=parent;
-modal.style.display="flex";
-modalTitle.textContent="Create Goal";
-title.value="";description.value="";dueDate.value="";
-}
-function editGoal(id){
-const g=findGoal(id,goals);
-editing=id;
-modal.style.display="flex";
-modalTitle.textContent="Edit Goal";
-title.value=g.title;
-description.value=g.description;
-dueDate.value=g.dueDate;
-}
-function closeModal(){modal.style.display="none";}
+let goals = [];
+let editing = null;
+let parentForNew = null;
 
-function saveGoal(){
-const data={title:title.value,description:description.value,dueDate:dueDate.value};
-if(editing){
-Object.assign(findGoal(editing,goals),data);
-}else{
-const goal={id:uid(),title:data.title,description:data.description,dueDate:data.dueDate,status:"Not Started",createdAt:new Date().toISOString(),collapsed:false,children:[]};
-if(parentForNew){
-findGoal(parentForNew,goals).children.push(goal);
-}else goals.push(goal);
-}
-saveData();render();closeModal();
+function uid() {
+return Date.now() + Math.random().toString(36).slice(2);
 }
 
-function findGoal(id,list){
-for(const g of list){
-if(g.id===id)return g;
-const f=findGoal(id,g.children||[]);
-if(f)return f;
+async function loadGoals() {
+const { data, error } = await supabase
+.from("goals")
+.select("*");
+
+if (error) {
+console.error(error);
+return;
+}
+
+goals = buildTree(data || []);
+render();
+}
+
+function buildTree(items) {
+const map = {};
+const roots = [];
+
+items.forEach(i => {
+map[i.id] = { ...i, children: [] };
+});
+
+items.forEach(i => {
+if (i.parentId && map[i.parentId]) {
+map[i.parentId].children.push(map[i.id]);
+} else {
+roots.push(map[i.id]);
+}
+});
+
+return roots;
+}
+
+function flatten(list, out = []) {
+for (const g of list) {
+out.push(g);
+flatten(g.children || [], out);
+}
+return out;
+}
+
+function findGoal(id, list = goals) {
+for (const g of list) {
+if (g.id === id) return g;
+
+```
+const child = findGoal(id, g.children || []);
+if (child) return child;
+```
+
 }
 }
 
-function deleteGoal(id,list=goals){
-for(let i=0;i<list.length;i++){
-if(list[i].id===id){list.splice(i,1);return true;}
-if(deleteGoal(id,list[i].children))return true;
-}
+function openCreate(parent = null) {
+editing = null;
+parentForNew = parent;
+
+modal.style.display = "flex";
+modalTitle.textContent = "Create Goal";
+
+title.value = "";
+description.value = "";
+dueDate.value = "";
 }
 
-function progress(goal){
-if(!goal.children.length)return goal.status==="Completed"?100:0;
-let done=goal.children.filter(x=>x.status==="Completed").length;
-return Math.round(done/goal.children.length*100);
+function editGoal(id) {
+const g = findGoal(id);
+
+editing = id;
+
+modal.style.display = "flex";
+modalTitle.textContent = "Edit Goal";
+
+title.value = g.title || "";
+description.value = g.description || "";
+dueDate.value = g.dueDate || "";
 }
 
-function daysText(date){
-if(!date)return "";
-const d=Math.ceil((new Date(date)-new Date())/86400000);
-if(d===0)return "Due Today";
-if(d<0)return Math.abs(d)+" Days Overdue";
-return d+" Days Left";
+function closeModal() {
+modal.style.display = "none";
 }
 
-function renderGoal(goal){
-const p=progress(goal);
-const div=document.createElement("div");
-div.className="goal card";
-div.innerHTML=`
-<div class="goal-header">
-<button onclick="toggle('${goal.id}')">${goal.collapsed?'▶':'▼'}</button>
+async function saveGoal() {
+const existing = editing ? findGoal(editing) : null;
+
+const row = {
+id: editing || uid(),
+title: title.value,
+description: description.value,
+dueDate: dueDate.value,
+status: existing?.status || "Not Started",
+createdAt: existing?.createdAt || new Date().toISOString(),
+parentId: parentForNew || existing?.parentId || null,
+collapsed: existing?.collapsed || false
+};
+
+const { error } = await supabase
+.from("goals")
+.upsert(row);
+
+if (error) {
+console.error(error);
+alert(error.message);
+return;
+}
+
+closeModal();
+editing = null;
+parentForNew = null;
+
+await loadGoals();
+}
+
+async function changeStatus(id, val) {
+await supabase
+.from("goals")
+.update({ status: val })
+.eq("id", id);
+
+await loadGoals();
+}
+
+async function toggle(id) {
+const g = findGoal(id);
+
+await supabase
+.from("goals")
+.update({ collapsed: !g.collapsed })
+.eq("id", id);
+
+await loadGoals();
+}
+
+async function removeGoal(id) {
+if (!confirm("Delete goal?")) return;
+
+await supabase
+.from("goals")
+.delete()
+.eq("id", id);
+
+await loadGoals();
+}
+
+function progress(goal) {
+if (!goal.children.length) {
+return goal.status === "Completed" ? 100 : 0;
+}
+
+const done = goal.children.filter(
+x => x.status === "Completed"
+).length;
+
+return Math.round(done / goal.children.length * 100);
+}
+
+function daysText(date) {
+if (!date) return "";
+
+const d = Math.ceil(
+(new Date(date) - new Date()) / 86400000
+);
+
+if (d === 0) return "Due Today";
+if (d < 0) return Math.abs(d) + " Days Overdue";
+
+return d + " Days Left";
+}
+
+function renderGoal(goal) {
+const p = progress(goal);
+
+const div = document.createElement("div");
+div.className = "goal card";
+
+div.innerHTML = `
+
+  <div class="goal-header">
+    <button onclick="toggle('${goal.id}')">
+      ${goal.collapsed ? '▶' : '▼'}
+    </button>
+
+```
 <strong>${goal.title}</strong>
+
 <span class="badge">${goal.status}</span>
-<span class="small">${daysText(goal.dueDate)}</span>
+
+<span class="small">
+  ${daysText(goal.dueDate)}
+</span>
+
 <select onchange="changeStatus('${goal.id}',this.value)">
-<option ${goal.status==='Not Started'?'selected':''}>Not Started</option>
-<option ${goal.status==='In Progress'?'selected':''}>In Progress</option>
-<option ${goal.status==='Completed'?'selected':''}>Completed</option>
+  <option ${goal.status === 'Not Started' ? 'selected' : ''}>Not Started</option>
+  <option ${goal.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
+  <option ${goal.status === 'Completed' ? 'selected' : ''}>Completed</option>
 </select>
+
 <button onclick="openCreate('${goal.id}')">Add Subgoal</button>
 <button onclick="editGoal('${goal.id}')">Edit</button>
 <button onclick="removeGoal('${goal.id}')">Delete</button>
-</div>
-<div>${goal.description||''}</div>
-<div class="progress"><div style="width:${p}%"></div></div>
-<div class="small">${p}% Complete</div>
-<div class="children" style="display:${goal.collapsed?'none':'block'}"></div>`;
-const childContainer=div.querySelector(".children");
-(goal.children||[]).forEach(c=>childContainer.appendChild(renderGoal(c)));
+```
+
+  </div>
+
+  <div>${goal.description || ''}</div>
+
+  <div class="progress">
+    <div style="width:${p}%"></div>
+  </div>
+
+  <div class="small">${p}% Complete</div>
+
+  <div class="children"
+       style="display:${goal.collapsed ? 'none' : 'block'}">
+  </div>
+  `;
+
+const childContainer =
+div.querySelector(".children");
+
+(goal.children || []).forEach(c => {
+childContainer.appendChild(renderGoal(c));
+});
+
 return div;
 }
 
-function changeStatus(id,val){findGoal(id,goals).status=val;saveData();render();}
-function toggle(id){findGoal(id,goals).collapsed=!findGoal(id,goals).collapsed;saveData();render();}
-function removeGoal(id){if(confirm("Delete goal?")){deleteGoal(id);saveData();render();}}
+function renderStats() {
+const all = flatten(goals, []);
 
-function flatten(list,out=[]){for(const g of list){out.push(g);flatten(g.children,out);}return out;}
+const completed =
+all.filter(g => g.status === "Completed").length;
 
-function renderStats(){
-const all=flatten(goals,[]);
-const completed=all.filter(g=>g.status==="Completed").length;
-const inprog=all.filter(g=>g.status==="In Progress").length;
-const overdue=all.filter(g=>g.dueDate && new Date(g.dueDate)<new Date() && g.status!=="Completed").length;
-const pct=all.length?Math.round(completed/all.length*100):0;
-stats.innerHTML=`
-<div class="card">Total Goals<br><strong>${all.length}</strong></div>
-<div class="card">Completed<br><strong>${completed}</strong></div>
-<div class="card">In Progress<br><strong>${inprog}</strong></div>
-<div class="card">Overdue<br><strong>${overdue}</strong></div>
-<div class="card">Completion %<br><strong>${pct}%</strong></div>`;
+const inprog =
+all.filter(g => g.status === "In Progress").length;
+
+const overdue =
+all.filter(
+g =>
+g.dueDate &&
+new Date(g.dueDate) < new Date() &&
+g.status !== "Completed"
+).length;
+
+const pct =
+all.length
+? Math.round(completed / all.length * 100)
+: 0;
+
+stats.innerHTML = `     <div class="card">Total Goals<br><strong>${all.length}</strong></div>     <div class="card">Completed<br><strong>${completed}</strong></div>     <div class="card">In Progress<br><strong>${inprog}</strong></div>     <div class="card">Overdue<br><strong>${overdue}</strong></div>     <div class="card">Completion %<br><strong>${pct}%</strong></div>
+  `;
 }
 
-function render(){
-let roots=[...goals];
-const q=search.value.toLowerCase();
-if(q){
-const filter=(arr)=>arr.filter(g=>(g.title+g.description).toLowerCase().includes(q));
-roots=filter(flatten(goals,[]));
+function render() {
+let roots = [...goals];
+
+const q = search.value.toLowerCase();
+
+if (q) {
+roots = flatten(goals, []).filter(
+g =>
+(g.title + g.description)
+.toLowerCase()
+.includes(q)
+);
 }
-goalTree.innerHTML="";
-if(!q){
-roots.forEach(g=>goalTree.appendChild(renderGoal(g)));
-}else{
-roots.forEach(g=>goalTree.appendChild(renderGoal(g)));
+
+goalTree.innerHTML = "";
+
+roots.forEach(g => {
+goalTree.appendChild(renderGoal(g));
+});
+
+renderStats();
 }
-renderStats();saveData();
-}
-search.oninput=render;
-render();
+
+search.oninput = render;
+
+loadGoals();
+
 </script>
 </body>
 </html>
